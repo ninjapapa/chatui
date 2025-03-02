@@ -5,6 +5,8 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Send } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import "./App.css"
 
 interface Message {
@@ -94,6 +96,24 @@ function App() {
     setInput("")
   }
 
+  const CodeBlock = ({ node, inline, className, children, ...props }) => {
+    const match = /language-(\w+)/.exec(className || '');
+    return !inline && match ? (
+        <SyntaxHighlighter
+            style={dracula}
+            language={match[1]}
+            PreTag="div"
+            {...props}
+        >
+            {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+    ) : (
+        <code className={className} {...props}>
+            {children}
+        </code>
+    );
+  };
+
   return (
     <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
       <header className="py-4 border-b">
@@ -126,7 +146,7 @@ function App() {
 
             {message.markdown && (
               <div className="bg-white border rounded-lg p-3 max-w-[80%] prose prose-sm">
-                <ReactMarkdown>{message.markdown}</ReactMarkdown>
+                <ReactMarkdown components={{ code: CodeBlock }}>{message.markdown}</ReactMarkdown>
               </div>
             )}
           </div>
