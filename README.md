@@ -1,54 +1,57 @@
-# React + TypeScript + Vite
+# Chat Interface for LLM appilations
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Features
 
-Currently, two official plugins are available:
+- Syntax highlighting for code blocks
+- Markdown formatting
+- Chat history
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Usage
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```bash
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then on application project, use ```FastAPI``` to serve the static files:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```python
+app = FastAPI()
+app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+
+@app.get("/")
+async def read_index():
+    return FileResponse("dist/index.html")
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("WebSocket connection opened")
+
+    moomoo_api = MooMooAPI()
+    index = moomoo_api.get_index()
+    chat_engine = index.as_chat_engine(
+        chat_mode="context",
+        system_prompt=(
+            "You are a codeing helper who can use API doc provided from the context to create python code"
+            " Please responde as Markdown with code blocks quoted with ```python"
+        )
+    )
+    while True:
+        user_query = await websocket.receive_text()
+        print(user_query)
+        response = await chat_engine.achat(user_query)
+        print(response.response)
+        agent_message = {
+            "role": "assistant",
+            "content": response.response
+        }
+        await websocket.send_text(json.dumps(agent_message))
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app_ui:app", host="localhost", port=8080, reload=True)
 ```
