@@ -24,7 +24,7 @@ function App() {
   // Connect to WebSocket
   useEffect(() => {
     // Replace with your actual WebSocket URL
-    const socket = new WebSocket("ws://localhost:8080")
+    const socket = new WebSocket("ws://localhost:8080/ws")
 
     socket.onopen = () => {
       console.log("WebSocket connected")
@@ -36,13 +36,13 @@ function App() {
         const data = JSON.parse(event.data)
 
         // Parse the content to extract thinking and markdown parts
-        const thinkMatch = data.content.match(/<Thinking>(.*?)<\/think>/s)
+        const thinkMatch = data.content.match(/<think>(.*?)<\/think>/s)
         const thinking = thinkMatch ? thinkMatch[1].trim() : ""
 
         // Extract markdown content (everything after the </Thinking> tag)
         let markdown = data.content
         if (thinkMatch) {
-          markdown = data.content.replace(/<Thinking>.*?<\/think>/s, "").trim()
+          markdown = data.content.replace(/<think>.*?<\/think>/s, "").trim()
         }
 
         const newMessage: Message = {
@@ -88,7 +88,7 @@ function App() {
 
     // Send message to WebSocket
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ message: input }))
+      socketRef.current.send(JSON.stringify(input))
     }
 
     setInput("")
@@ -110,6 +110,12 @@ function App() {
         {messages.map((message, index) => (
           <div key={index} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
             <div className="font-semibold text-sm mb-1">{message.role === "user" ? "You" : message.role}</div>
+
+            {message.role === "user" && message.content && (
+              <div className="bg-gray-100 rounded-lg p-3 mb-2 max-w-[80%] text-sm">
+                <div className="whitespace-pre-wrap">{message.content}</div>
+              </div>
+            )}
 
             {message.thinking && (
               <div className="bg-gray-100 rounded-lg p-3 mb-2 max-w-[80%] text-sm">
