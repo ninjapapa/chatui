@@ -26,4 +26,8 @@ python -m unittest -v \
   tests.test_pm_loop \
   tests.test_connectivity
 
-echo "[3/3] Done"
+echo "[3/4] UI smoke"
+cd "$ROOT_DIR"
+./scripts/smoke.sh
+
+echo "[4/4] Done"
