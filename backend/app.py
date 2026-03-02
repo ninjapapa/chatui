@@ -168,3 +168,36 @@ def create_freeform_feedback(payload: FreeformFeedbackCreate):
         )
 
     return {"ok": True, "feedback_id": payload.id}
+
+# --- WebSocket (Issue #3) ---
+
+from fastapi import WebSocket, WebSocketDisconnect  # noqa: E402
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            # Frontend currently sends JSON.stringify(input), so raw is a JSON string.
+            try:
+                user_text = json.loads(raw)
+                if not isinstance(user_text, str):
+                    user_text = str(user_text)
+            except Exception:
+                user_text = raw
+
+            assistant_text = (
+                "<think>Echo stub (Issue #3). No LLM yet.</think>\n\n"
+                f"You said: **{user_text}**\n\n"
+                "Next: replace this with LLM call + citations."
+            )
+
+            payload = {"role": "assistant", "content": assistant_text}
+            await websocket.send_text(json.dumps(payload))
+
+    except WebSocketDisconnect:
+        # client disconnected
+        return

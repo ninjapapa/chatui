@@ -30,6 +30,15 @@ class TestConnectivity(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"ok": True})
 
+    def test_websocket_echo(self):
+        with self.client.websocket_connect("/ws") as ws:
+            ws.send_text("\"hello\"")
+            data = ws.receive_json()
+            self.assertEqual(data["role"], "assistant")
+            self.assertIn("You said", data["content"])
+            self.assertIn("hello", data["content"])
+
+
     def test_db_info(self):
         r = self.client.get("/api/db")
         self.assertEqual(r.status_code, 200)
