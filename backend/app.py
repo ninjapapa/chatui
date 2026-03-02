@@ -79,6 +79,49 @@ def db_info():
     return {"db_path": str(Path(DEFAULT_DB_PATH).resolve())}
 
 
+
+@app.get("/api/backlog")
+def backlog(limit: int = 50):
+    """Return a small backlog snapshot (open GitHub issues).
+
+    Uses GitHub CLI if available/authenticated. If it fails, returns an empty list
+    plus a link to the repo's Issues page.
+    """
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+
+    repo = os.environ.get("GITHUB_REPO", "ninjapapa/chatui")
+    issues_url = f"https://github.com/{repo}/issues"
+
+    try:
+        import subprocess
+
+        res = subprocess.run(
+            [
+                "gh",
+                "issue",
+                "list",
+                "-R",
+                repo,
+                "--state",
+                "open",
+                "--limit",
+                str(limit),
+                "--json",
+                "number,title,url",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        items = json.loads(res.stdout or "[]")
+        if not isinstance(items, list):
+            items = []
+    except Exception:
+        items = []
+
+    return {"repo": repo, "issuesUrl": issues_url, "items": items}
+
 @app.get("/api/changelog")
 def list_changelog(limit: int = 30):
     if limit < 1 or limit > 200:

@@ -11,6 +11,7 @@ import "./App.css"
 import { getJson, postJson, backendWsBase } from "./api"
 import { getOrCreateChatId } from "./chatId"
 import Changelog from "./Changelog"
+import Backlog from "./Backlog"
 import AnswerFeedback from "./AnswerFeedback"
 import FeatureRequest from "./FeatureRequest"
 
@@ -49,7 +50,7 @@ function App() {
   const [chatId, setChatId] = useState<string | null>(null)
   const [freeformText, setFreeformText] = useState("")
   const [freeformStatus, setFreeformStatus] = useState<string | null>(null)
-  const [view, setView] = useState<"chat" | "changelog">("chat")
+  const [view, setView] = useState<"chat" | "changelog" | "backlog">("chat")
 
   const socketRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -244,6 +245,10 @@ function App() {
       {view === "changelog" ? (
         <div className="flex-1 overflow-y-auto">
           <Changelog />
+        </div>
+      ) : view === "backlog" ? (
+        <div className="flex-1 overflow-y-auto">
+          <Backlog />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto py-4 space-y-4">
