@@ -12,6 +12,7 @@ import { getJson, postJson, backendWsBase } from "./api"
 import { getOrCreateChatId } from "./chatId"
 import Changelog from "./Changelog"
 import AnswerFeedback from "./AnswerFeedback"
+import FeatureRequest from "./FeatureRequest"
 
 interface Message {
   id?: string
@@ -236,6 +237,8 @@ function App() {
           </button>
         </div>
         {freeformStatus && <div className="text-center text-xs text-gray-600 mt-1">{freeformStatus}</div>}
+
+        {chatId && <FeatureRequest chatId={chatId} />}
       </header>
 
       {view === "changelog" ? (
