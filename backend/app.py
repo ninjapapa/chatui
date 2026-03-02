@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from db import DEFAULT_DB_PATH, get_conn, init_db
 from models import (
@@ -24,6 +25,16 @@ def now_iso() -> str:
 
 
 app = FastAPI(title="chatui-backend", version="0.1.0")
+
+# Local MVP: allow frontend dev server to call backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # If FRONTEND_DIST is set, serve the built frontend from that directory.
 # By default, expect: <repo-root>/dist
