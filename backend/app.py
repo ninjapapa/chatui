@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from db import DEFAULT_DB_PATH, get_conn, init_db
 from models import (
@@ -22,10 +25,34 @@ def now_iso() -> str:
 
 app = FastAPI(title="chatui-backend", version="0.1.0")
 
+# If FRONTEND_DIST is set, serve the built frontend from that directory.
+# By default, expect: <repo-root>/dist
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DIST_DIR = REPO_ROOT / "dist"
+DIST_DIR = Path(os.environ.get("FRONTEND_DIST", str(DEFAULT_DIST_DIR))).resolve()
+
 
 @app.on_event("startup")
 def _startup() -> None:
     init_db(DEFAULT_DB_PATH)
+
+
+# Static hosting (optional)
+if DIST_DIR.exists():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+
+@app.get("/")
+def read_index():
+    index_path = DIST_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Frontend build not found at {index_path}. Run `npm run build` at repo root.",
+        )
+    return FileResponse(str(index_path))
 
 
 @app.get("/api/health")
