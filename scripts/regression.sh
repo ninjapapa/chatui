@@ -5,11 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "== chatui regression =="
 
-echo "[1/3] Frontend: TypeScript + build"
+echo "[1/4] Frontend: TypeScript + build"
 cd "$ROOT_DIR"
 npm run build
 
-echo "[2/3] Backend: unit tests"
+echo "[2/4] Backend: unit tests"
 cd "$ROOT_DIR/backend"
 
 if [[ ! -d .venv ]]; then
@@ -23,6 +23,7 @@ source .venv/bin/activate
 python -m unittest -v \
   tests.test_db_init \
   tests.test_changelog \
+  tests.test_feedback_list \
   tests.test_pm_loop \
   tests.test_connectivity
 

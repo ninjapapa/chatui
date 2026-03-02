@@ -52,7 +52,7 @@ The system should behave like a product that evolves continuously based on actua
   - auth-free feedback capture (for prototyping)
   - a “feature requests” list + status
   - a changelog view
-- A minimal backend (TBD) to store:
+- A minimal backend to store:
   - feedback items
   - decisions / specs
   - agent runs + artifacts
@@ -62,12 +62,13 @@ The system should behave like a product that evolves continuously based on actua
 
 ## Architecture sketch
 
-- **Frontend:** Vite + React + Tailwind (current)
-- **Backend:** TBD (could start as a JSON store / SQLite)
-- **Agent runner:** OpenClaw (orchestrator) + coding agent sessions
-- **CI/CD:** TBD (GitHub Actions)
+- **Frontend:** Vite + React + Tailwind
+- **Backend:** FastAPI (local MVP)
+- **Storage:** SQLite (see `docs/DECISIONS.md`)
 
-## Dev
+## Local dev
+
+### 1) Frontend dev server
 
 Install deps:
 
@@ -81,7 +82,62 @@ Run dev server:
 npm run dev
 ```
 
+### 2) Backend (FastAPI)
+
+Create a Python venv and install deps:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run the backend:
+
+```bash
+uvicorn backend.app:app --reload --port 8080
+```
+
+### 3) Build + serve the frontend via backend
+
+Build the frontend:
+
+```bash
+cd ..
+npm run build
+```
+
+Then run the backend (it serves `dist/`):
+
+```bash
+cd backend
+source .venv/bin/activate
+FRONTEND_DIST="../dist" uvicorn backend.app:app --reload --port 8080
+```
+
+## Tests
+
+### One-command (recommended)
+
+```bash
+npm test
+```
+
+This runs:
+- frontend build + lint
+- backend unit tests (requires `backend/.venv`)
+- Playwright smoke test (installs Chromium on first run)
+
+### Individual commands
+
+```bash
+npm run lint
+npm run backend:test
+npm run smoke
+npm run regression
+```
+
 ## Notes
 
 - The existing codebase may contain leftover UI/components from the original project. We’ll replace/reshape incrementally.
-- This README is intentionally high-level; we’ll firm up the spec once the first in-app feedback flow exists.
