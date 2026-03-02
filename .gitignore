@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local data
+backend/data/
+*.sqlite3
+
+# Node
+node_modules/
+dist/
