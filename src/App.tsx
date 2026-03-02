@@ -83,15 +83,18 @@ function App() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        const newMessage = parseIncomingMessage(data)
+        const parsed = parseIncomingMessage(data)
+
+        // Ensure assistant messages have a stable id for feedback + persistence
+        const newMessage: Message =
+          parsed.role === "assistant" ? { ...parsed, id: parsed.id ?? `asst_${crypto.randomUUID()}` } : parsed
 
         setMessages((prev) => [...prev, newMessage])
 
         // Persist assistant message
-        if (chatId && newMessage.role === "assistant") {
-          const msgId = newMessage.id ?? `asst_${crypto.randomUUID()}`
+        if (chatId && newMessage.role === "assistant" && newMessage.id) {
           postJson("/api/message", {
-            id: msgId,
+            id: newMessage.id,
             chat_id: chatId,
             role: "assistant",
             content: newMessage.content,
