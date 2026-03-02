@@ -124,11 +124,44 @@ def fetch_new_feedback(since_iso: str | None, limit: int = 50) -> list[dict]:
     return out
 
 
+def _gh_list_labels() -> set[str]:
+    """Return repo labels (lowercased names)."""
+    try:
+        res = subprocess.run(
+            ["gh", "label", "list", "-R", GITHUB_REPO, "--limit", "200"],
+            check=True, capture_output=True, text=True,
+        )
+    except Exception:
+        return set()
+
+    out: set[str] = set()
+    for line in (res.stdout or "").splitlines():
+        # format: <name>	<description>	<color> (or similar)
+        name = (line.split("	", 1)[0] if "	" in line else line.split(" ", 1)[0]).strip()
+        if name:
+            out.add(name.lower())
+    return out
+
+
+def _safe_labels(requested: list[str] | None) -> list[str] | None:
+    if not requested:
+        return None
+    avail = _gh_list_labels()
+    if not avail:
+        # If we can't list labels, be conservative and don't pass any.
+        return None
+
+    filtered = [l for l in requested if l.lower() in avail]
+    return filtered or None
+
+
 def gh_issue_create(title: str, body: str, labels: list[str] | None = None) -> str:
     cmd = ["gh", "issue", "create", "-R", GITHUB_REPO, "--title", title, "--body", body]
-    if labels:
-        for l in labels:
+    safe = _safe_labels(labels)
+    if safe:
+        for l in safe:
             cmd.extend(["--label", l])
+
     res = subprocess.run(cmd, check=True, capture_output=True, text=True)
     # gh prints the URL on stdout
     url = res.stdout.strip().splitlines()[-1]
