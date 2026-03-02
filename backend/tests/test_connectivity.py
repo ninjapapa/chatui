@@ -108,5 +108,12 @@ class TestConnectivity(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
 
+
+
+    def test_changelog_empty(self):
+        r = self.client.get("/api/changelog?limit=5")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), [])
+
 if __name__ == "__main__":
     unittest.main()

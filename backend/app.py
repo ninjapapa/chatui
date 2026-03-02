@@ -77,6 +77,24 @@ def db_info():
     return {"db_path": str(Path(DEFAULT_DB_PATH).resolve())}
 
 
+@app.get("/api/changelog")
+def list_changelog(limit: int = 30):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, body_md, created_at
+            FROM changelog_entries
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+
 @app.post("/api/chat")
 def create_chat(payload: ChatCreate):
     with get_conn() as conn:

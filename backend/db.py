@@ -93,3 +93,36 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_freeform_feedback_created_at ON freeform_feedback(created_at);"
         )
+
+
+        # Changelog entries (what shipped / what happened last run)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS changelog_entries (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              body_md TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_changelog_entries_created_at ON changelog_entries(created_at DESC);"
+        )
+
+        # PM loop runs (tracks last run + what it did)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pm_runs (
+              id TEXT PRIMARY KEY,
+              started_at TEXT NOT NULL,
+              finished_at TEXT,
+              status TEXT NOT NULL,
+              new_feedback_count INTEGER NOT NULL,
+              notes TEXT
+            );
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pm_runs_started_at ON pm_runs(started_at DESC);"
+        )
