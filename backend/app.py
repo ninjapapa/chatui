@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 
 from db import DEFAULT_DB_PATH, get_conn, init_db
 from llm import answer_with_citations
-
 from models import (
     AnswerFeedbackCreate,
     ChatCreate,
@@ -94,7 +94,6 @@ def list_changelog(limit: int = 30):
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
-
 
 
 @app.post("/api/chat")
@@ -200,9 +199,8 @@ def create_freeform_feedback(payload: FreeformFeedbackCreate):
 
     return {"ok": True, "feedback_id": payload.id}
 
-# --- WebSocket (Issue #3) ---
 
-from fastapi import WebSocket, WebSocketDisconnect  # noqa: E402
+# --- WebSocket (Issue #3) ---
 
 
 @app.websocket("/ws")
@@ -212,22 +210,41 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             raw = await websocket.receive_text()
-            # Frontend currently sends JSON.stringify(input), so raw is a JSON string.
-            try:
-                user_text = json.loads(raw)
-                if not isinstance(user_text, str):
-                    user_text = str(user_text)
-            except Exception:
-                user_text = raw
 
+            chat_id: str | None = None
+            parent_message_id: str | None = None
+            user_text: str
+
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                msg = raw
+
+            # Frontend sends a JSON object: { chat_id, message_id, content }
+            if isinstance(msg, dict):
+                chat_id = msg.get("chat_id")
+                parent_message_id = msg.get("message_id")
+                user_text = msg.get("content") or ""
+            elif isinstance(msg, str):
+                user_text = msg
+            else:
+                user_text = str(msg)
+
+            assistant_id = f"asst_{uuid.uuid4().hex}"
             assistant_text = "<think>Generating answer with citations...</think>\n\n" + answer_with_citations(user_text)
 
-            payload = {"role": "assistant", "content": assistant_text}
+            payload = {
+                "id": assistant_id,
+                "chat_id": chat_id,
+                "parent_message_id": parent_message_id,
+                "role": "assistant",
+                "content": assistant_text,
+            }
             await websocket.send_text(json.dumps(payload))
 
     except WebSocketDisconnect:
-        # client disconnected
         return
+
 
 @app.get("/api/feedback/answer")
 def list_answer_feedback(limit: int = 100):
