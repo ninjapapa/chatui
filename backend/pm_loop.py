@@ -92,7 +92,7 @@ def main() -> int:
     plan_path = write_daily_plan(new_count)
     chg_id = insert_changelog_entry(
         title="Nightly PM loop ran",
-        body_md=f"Generated plan: `{plan_path.relative_to(REPO_ROOT)}`\n\nNew feedback count: **{new_count}**\n\nChangelog id: `{chg_id}`",
+        body_md=f"Generated plan: `{plan_path.relative_to(REPO_ROOT)}`\n\nNew feedback count: **{new_count}**\n\nChangelog id: (this entry)",
     )
 
     record_run(started_at, now_iso(), "ok", new_count, f"plan={plan_path} changelog={chg_id}")
