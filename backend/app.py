@@ -230,3 +230,36 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         # client disconnected
         return
+
+@app.get("/api/feedback/answer")
+def list_answer_feedback(limit: int = 100):
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, chat_id, message_id, thumbs, comment, created_at, metadata_json
+            FROM answer_feedback
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/feedback/freeform")
+def list_freeform_feedback(limit: int = 100):
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, chat_id, text, created_at, metadata_json
+            FROM freeform_feedback
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]

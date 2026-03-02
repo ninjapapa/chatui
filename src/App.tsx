@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 import "./App.css"
-import { getJson, postJson, BACKEND_HTTP } from "./api"
+import { getJson, postJson, backendWsBase } from "./api"
 import { getOrCreateChatId } from "./chatId"
 import Changelog from "./Changelog"
 import AnswerFeedback from "./AnswerFeedback"
@@ -73,7 +73,7 @@ function App() {
 
   // Connect to WebSocket
   useEffect(() => {
-    const socket = new WebSocket(BACKEND_HTTP.replace(/^http/, "ws") + "/ws")
+    const socket = new WebSocket(backendWsBase() + "/ws")
 
     socket.onopen = () => {
       console.log("WebSocket connected")
