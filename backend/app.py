@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+
+from db import DEFAULT_DB_PATH, get_conn, init_db
+from models import (
+    AnswerFeedbackCreate,
+    ChatCreate,
+    FreeformFeedbackCreate,
+    MessageCreate,
+    MessageOut,
+)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+app = FastAPI(title="chatui-backend", version="0.1.0")
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    init_db(DEFAULT_DB_PATH)
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/api/db")
+def db_info():
+    # Small debugging endpoint for local MVP
+    return {"db_path": str(Path(DEFAULT_DB_PATH).resolve())}
+
+
+@app.post("/api/chat")
+def create_chat(payload: ChatCreate):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO chats(id, created_at) VALUES (?, ?)",
+            (payload.chat_id, now_iso()),
+        )
+    return {"ok": True, "chat_id": payload.chat_id}
+
+
+@app.post("/api/message")
+def create_message(payload: MessageCreate):
+    with get_conn() as conn:
+        # ensure chat exists
+        conn.execute(
+            "INSERT OR IGNORE INTO chats(id, created_at) VALUES (?, ?)",
+            (payload.chat_id, now_iso()),
+        )
+
+        metadata_json = json.dumps(payload.metadata) if payload.metadata is not None else None
+        conn.execute(
+            """
+            INSERT INTO messages(id, chat_id, role, content, created_at, parent_message_id, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.id,
+                payload.chat_id,
+                payload.role,
+                payload.content,
+                now_iso(),
+                payload.parent_message_id,
+                metadata_json,
+            ),
+        )
+    return {"ok": True, "message_id": payload.id}
+
+
+@app.get("/api/messages", response_model=list[MessageOut])
+def list_messages(chat_id: str, limit: int = 200):
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be 1..1000")
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, chat_id, role, content, created_at, parent_message_id, metadata_json
+            FROM messages
+            WHERE chat_id = ?
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (chat_id, limit),
+        ).fetchall()
+
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/feedback/answer")
+def create_answer_feedback(payload: AnswerFeedbackCreate):
+    with get_conn() as conn:
+        # Basic integrity check: message must exist
+        msg = conn.execute(
+            "SELECT id FROM messages WHERE id = ?",
+            (payload.message_id,),
+        ).fetchone()
+        if msg is None:
+            raise HTTPException(status_code=404, detail="message_id not found")
+
+        metadata_json = json.dumps(payload.metadata) if payload.metadata is not None else None
+        conn.execute(
+            """
+            INSERT INTO answer_feedback(id, chat_id, message_id, thumbs, comment, created_at, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.id,
+                payload.chat_id,
+                payload.message_id,
+                payload.thumbs,
+                payload.comment,
+                now_iso(),
+                metadata_json,
+            ),
+        )
+
+    return {"ok": True, "feedback_id": payload.id}
+
+
+@app.post("/api/feedback/freeform")
+def create_freeform_feedback(payload: FreeformFeedbackCreate):
+    with get_conn() as conn:
+        metadata_json = json.dumps(payload.metadata) if payload.metadata is not None else None
+        conn.execute(
+            """
+            INSERT INTO freeform_feedback(id, chat_id, text, created_at, metadata_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (payload.id, payload.chat_id, payload.text, now_iso(), metadata_json),
+        )
+
+    return {"ok": True, "feedback_id": payload.id}
