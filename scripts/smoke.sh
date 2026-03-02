@@ -31,6 +31,8 @@ source .venv/bin/activate
 
 export FRONTEND_DIST="$ROOT_DIR/dist"
 export CHATUI_DB_PATH="$(mktemp -t chatui-smoke-XXXX.sqlite3)"
+export CHATUI_TEST_MODE="1"
+export OPENAI_API_KEY="test"
 export PW_BASE_URL="http://127.0.0.1:${PORT}/"
 
 uvicorn app:app --host 127.0.0.1 --port "$PORT" >/tmp/chatui-smoke-backend.log 2>&1 &

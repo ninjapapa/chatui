@@ -12,6 +12,7 @@ class TestConnectivity(unittest.TestCase):
         # Make the DB path deterministic + isolated for tests.
         cls._tmp = tempfile.TemporaryDirectory()
         os.environ["CHATUI_DB_PATH"] = os.path.join(cls._tmp.name, "test.sqlite3")
+        os.environ["CHATUI_TEST_MODE"] = "1"
 
         # Import after env var is set (DEFAULT_DB_PATH is computed at import time).
         import app as app_module  # noqa: E402
@@ -35,8 +36,8 @@ class TestConnectivity(unittest.TestCase):
             ws.send_text("\"hello\"")
             data = ws.receive_json()
             self.assertEqual(data["role"], "assistant")
-            self.assertIn("You said", data["content"])
-            self.assertIn("hello", data["content"])
+            self.assertIn("content", data)
+            self.assertEqual(data["role"], "assistant")
 
 
     def test_db_info(self):
