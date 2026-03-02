@@ -11,6 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from db import DEFAULT_DB_PATH, get_conn, init_db
+from llm import answer_with_citations
+
 from models import (
     AnswerFeedbackCreate,
     ChatCreate,
@@ -218,11 +220,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 user_text = raw
 
-            assistant_text = (
-                "<think>Echo stub (Issue #3). No LLM yet.</think>\n\n"
-                f"You said: **{user_text}**\n\n"
-                "Next: replace this with LLM call + citations."
-            )
+            assistant_text = "<think>Generating answer with citations...</think>\n\n" + answer_with_citations(user_text)
 
             payload = {"role": "assistant", "content": assistant_text}
             await websocket.send_text(json.dumps(payload))
