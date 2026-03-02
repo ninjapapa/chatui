@@ -89,3 +89,20 @@ First 3 GitHub Issues:
 - Every answer gathers feedback (👍/👎 + optional comment)
 - Nightly run happens only if there is new feedback
 - Start with HITL (approve plan, approve PR, approve deploy) then reduce over time
+
+## Project learnings (keep here, not in workspace MEMORY.md)
+
+- Backend module imports:
+  - We run uvicorn as `uvicorn app:app` from `backend/`, so `backend/app.py` must use **absolute imports** like `from db import ...` (not relative `from .db import ...`) unless we restructure it as a proper Python package.
+
+- FastAPI startup + tests:
+  - DB tables are created in a startup event; when testing with `TestClient`, use it as a **context manager** (or explicitly enter/exit) so startup events run.
+
+- FastAPI TestClient dependencies:
+  - `fastapi.testclient` requires **httpx**. Keep `httpx` pinned in `backend/requirements.txt`.
+
+- Ports:
+  - `8080` may already be in use; prefer picking a free port or ensure old uvicorn sessions are stopped.
+
+- Shell quoting:
+  - When creating GitHub issues via CLI, avoid unescaped backticks in bodies (they can be executed by the shell). Prefer `$'...'` quoting or `--body-file`.
