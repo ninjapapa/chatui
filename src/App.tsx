@@ -5,28 +5,72 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Send } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
+import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 import "./App.css"
+import { getJson, postJson, BACKEND_HTTP } from "./api"
+import { getOrCreateChatId } from "./chatId"
 
 interface Message {
+  id?: string
+  chat_id?: string
   role: string
   content: string
   thinking?: string
   markdown?: string
+  parent_message_id?: string
+}
+
+function parseIncomingMessage(data: any): Message {
+  const content: string = data.content ?? ""
+  const thinkMatch = content.match(/<think>(.*?)<\/think>/s)
+  const thinking = thinkMatch ? thinkMatch[1].trim() : ""
+  let markdown = content
+  if (thinkMatch) markdown = content.replace(/<think>.*?<\/think>/s, "").trim()
+
+  return {
+    id: data.id,
+    chat_id: data.chat_id,
+    role: data.role,
+    content,
+    thinking,
+    markdown,
+    parent_message_id: data.parent_message_id,
+  }
 }
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isConnected, setIsConnected] = useState(false)
+  const [chatId, setChatId] = useState<string | null>(null)
+  const [freeformText, setFreeformText] = useState("")
+  const [freeformStatus, setFreeformStatus] = useState<string | null>(null)
+
   const socketRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Initialize chat id + hydrate history
+  useEffect(() => {
+    const id = getOrCreateChatId()
+    setChatId(id)
+
+    // Ensure chat exists in backend (best-effort)
+    postJson("/api/chat", { chat_id: id }).catch(() => {})
+
+    getJson<Message[]>(`/api/messages?chat_id=${encodeURIComponent(id)}&limit=200`)
+      .then((rows) => {
+        const hydrated = rows.map((r: any) => parseIncomingMessage(r))
+        setMessages(hydrated)
+      })
+      .catch((err) => {
+        console.warn("Failed to hydrate messages:", err)
+      })
+  }, [])
+
   // Connect to WebSocket
   useEffect(() => {
-    // Replace with your actual WebSocket URL
-    const socket = new WebSocket("ws://localhost:8080/ws")
+    const socket = new WebSocket(BACKEND_HTTP.replace(/^http/, "ws") + "/ws")
 
     socket.onopen = () => {
       console.log("WebSocket connected")
@@ -36,25 +80,21 @@ function App() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-
-        // Parse the content to extract thinking and markdown parts
-        const thinkMatch = data.content.match(/<think>(.*?)<\/think>/s)
-        const thinking = thinkMatch ? thinkMatch[1].trim() : ""
-
-        // Extract markdown content (everything after the </Thinking> tag)
-        let markdown = data.content
-        if (thinkMatch) {
-          markdown = data.content.replace(/<think>.*?<\/think>/s, "").trim()
-        }
-
-        const newMessage: Message = {
-          role: data.role,
-          content: data.content,
-          thinking,
-          markdown,
-        }
+        const newMessage = parseIncomingMessage(data)
 
         setMessages((prev) => [...prev, newMessage])
+
+        // Persist assistant message
+        if (chatId && newMessage.role === "assistant") {
+          const msgId = newMessage.id ?? `asst_${crypto.randomUUID()}`
+          postJson("/api/message", {
+            id: msgId,
+            chat_id: chatId,
+            role: "assistant",
+            content: newMessage.content,
+            parent_message_id: newMessage.parent_message_id,
+          }).catch((err) => console.warn("Persist assistant message failed:", err))
+        }
       } catch (error) {
         console.error("Error parsing message:", error)
       }
@@ -65,70 +105,140 @@ function App() {
       setIsConnected(false)
     }
 
+    socket.onerror = (e) => {
+      console.warn("WebSocket error:", e)
+      setIsConnected(false)
+    }
+
     socketRef.current = socket
 
     return () => {
       socket.close()
     }
-  }, [])
+  }, [chatId])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || !isConnected) return
+    if (!input.trim() || !isConnected || !chatId) return
+
+    const userMsgId = `user_${crypto.randomUUID()}`
 
     // Add user message to the chat
     const userMessage: Message = {
+      id: userMsgId,
+      chat_id: chatId,
       role: "user",
       content: input,
     }
     setMessages((prev) => [...prev, userMessage])
 
+    // Persist user message
+    postJson("/api/message", {
+      id: userMsgId,
+      chat_id: chatId,
+      role: "user",
+      content: input,
+    }).catch((err) => console.warn("Persist user message failed:", err))
+
     // Send message to WebSocket
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(input))
+      socketRef.current.send(
+        JSON.stringify({
+          chat_id: chatId,
+          message_id: userMsgId,
+          content: input,
+        })
+      )
     }
 
     setInput("")
   }
 
-  const CodeBlock = ({ node, inline, className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
+  const submitAnswerFeedback = async (message: Message, thumbs: 1 | -1) => {
+    if (!chatId || !message.id) return
+
+    const comment = window.prompt("Optional comment? (leave blank to skip)") ?? ""
+
+    await postJson("/api/feedback/answer", {
+      id: `fb_${crypto.randomUUID()}`,
+      chat_id: chatId,
+      message_id: message.id,
+      thumbs,
+      comment: comment.trim() ? comment.trim() : null,
+    })
+
+    // minimal UI: mark as rated
+    setMessages((prev) =>
+      prev.map((m) => (m.id === message.id ? { ...m, metadata: { ...(m as any).metadata, rated: thumbs } } : m))
+    )
+  }
+
+  const submitFreeform = async () => {
+    if (!chatId || !freeformText.trim()) return
+    setFreeformStatus("Saving...")
+    try {
+      await postJson("/api/feedback/freeform", {
+        id: `ff_${crypto.randomUUID()}`,
+        chat_id: chatId,
+        text: freeformText,
+      })
+      setFreeformText("")
+      setFreeformStatus("Saved")
+      setTimeout(() => setFreeformStatus(null), 1500)
+    } catch (e: any) {
+      setFreeformStatus(`Error: ${e?.message ?? e}`)
+    }
+  }
+
+  const CodeBlock = ({ inline, className, children, ...props }: any) => {
+    const match = /language-(\w+)/.exec(className || "")
     return !inline && match ? (
-        <SyntaxHighlighter
-            style={dracula}
-            language={match[1]}
-            PreTag="div"
-            {...props}
-        >
-            {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
+      <SyntaxHighlighter style={dracula} language={match[1]} PreTag="div" {...props}>
+        {String(children).replace(/\n$/, "")}
+      </SyntaxHighlighter>
     ) : (
-        <code className={className} {...props}>
-            {children}
-        </code>
-    );
-  };
+      <code className={className} {...props}>
+        {children}
+      </code>
+    )
+  }
 
   return (
     <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
       <header className="py-4 border-b">
         <h1 className="text-2xl font-bold text-center">Chat Interface</h1>
         <div className="text-center">
-          <span
-            className={`inline-block w-3 h-3 rounded-full mr-2 ${isConnected ? "bg-green-500" : "bg-red-500"}`}
-          ></span>
+          <span className={`inline-block w-3 h-3 rounded-full mr-2 ${isConnected ? "bg-green-500" : "bg-red-500"}`}></span>
           {isConnected ? "Connected" : "Disconnected"}
         </div>
+
+        <div className="mt-3 flex gap-2 items-center justify-center">
+          <input
+            value={freeformText}
+            onChange={(e) => setFreeformText(e.target.value)}
+            placeholder="Free-form feedback (catch-all)…"
+            className="w-full max-w-xl p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={submitFreeform}
+            className="bg-gray-900 text-white px-3 py-2 rounded-lg disabled:bg-gray-400"
+            disabled={!freeformText.trim() || !chatId}
+            type="button"
+          >
+            Send
+          </button>
+        </div>
+        {freeformStatus && <div className="text-center text-xs text-gray-600 mt-1">{freeformStatus}</div>}
       </header>
 
       <div className="flex-1 overflow-y-auto py-4 space-y-4">
         {messages.map((message, index) => (
-          <div key={index} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
+          <div key={message.id ?? index} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
             <div className="font-semibold text-sm mb-1">{message.role === "user" ? "You" : message.role}</div>
 
             {message.role === "user" && message.content && (
@@ -137,16 +247,34 @@ function App() {
               </div>
             )}
 
-            {message.thinking && (
-              <div className="bg-gray-100 rounded-lg p-3 mb-2 max-w-[80%] text-sm">
-                <div className="font-medium text-gray-500 mb-1">Thinking:</div>
-                <div className="whitespace-pre-wrap">{message.thinking}</div>
-              </div>
-            )}
-
-            {message.markdown && (
+            {message.role !== "user" && (
               <div className="bg-white border rounded-lg p-3 max-w-[80%] prose prose-sm">
-                <ReactMarkdown components={{ code: CodeBlock }}>{message.markdown}</ReactMarkdown>
+                {message.thinking && (
+                  <details className="mb-2">
+                    <summary className="cursor-pointer text-gray-500">Thinking</summary>
+                    <div className="whitespace-pre-wrap text-sm mt-1">{message.thinking}</div>
+                  </details>
+                )}
+                {message.markdown && <ReactMarkdown components={{ code: CodeBlock }}>{message.markdown}</ReactMarkdown>}
+
+                {message.role === "assistant" && message.id && (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      className="px-2 py-1 border rounded hover:bg-gray-50"
+                      onClick={() => submitAnswerFeedback(message, 1)}
+                    >
+                      👍
+                    </button>
+                    <button
+                      type="button"
+                      className="px-2 py-1 border rounded hover:bg-gray-50"
+                      onClick={() => submitAnswerFeedback(message, -1)}
+                    >
+                      👎
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -178,4 +306,3 @@ function App() {
 }
 
 export default App
-
