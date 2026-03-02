@@ -106,3 +106,24 @@ First 3 GitHub Issues:
 
 - Shell quoting:
   - When creating GitHub issues via CLI, avoid unescaped backticks in bodies (they can be executed by the shell). Prefer `$'...'` quoting or `--body-file`.
+
+## Regression test (run before PR)
+
+Run the repo regression checks with:
+
+```bash
+./scripts/regression.sh
+```
+
+It performs:
+- `npm run build` (frontend typecheck + production build)
+- backend unit tests (requires `backend/.venv` to exist)
+
+If `backend/.venv` is missing:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
