@@ -116,6 +116,31 @@ source .venv/bin/activate
 FRONTEND_DIST="../dist" uvicorn backend.app:app --reload --port 8080
 ```
 
+## Nightly PM loop
+
+To run the PM loop on-demand (creates/updates GitHub issues from new feedback; skips if none):
+
+```bash
+./scripts/pm_loop_run.sh
+```
+
+To install a nightly cron (default 02:10 local time):
+
+```bash
+./scripts/install_pm_cron.sh
+# optional: pass a custom cron schedule, e.g.
+./scripts/install_pm_cron.sh "0 1 * * *"
+```
+
+To uninstall:
+
+```bash
+./scripts/uninstall_pm_cron.sh
+```
+
+Logs:
+- `backend/data/pm_loop.log`
+
 ## Tests
 
 ### One-command (recommended)
