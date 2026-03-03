@@ -5,6 +5,8 @@ from typing import Any
 
 from openai import OpenAI
 
+from retrieval import retrieve
+
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 
@@ -37,12 +39,23 @@ def answer_with_citations(user_text: str) -> str:
 Note: For now, citations may be general authoritative sources.
 Later we will wire in web search + grounded citations.
 """
+    docs = retrieve(user_text, count=int(os.environ.get("CHATUI_SEARCH_COUNT", "5")))
+
+    context_block = ""
+    if docs:
+        # Include a small amount of text for grounding; keep prompt short.
+        chunks = []
+        for i, d in enumerate(docs, start=1):
+            t = (d.text or "")[:2000]
+            chunks.append(f"[Source {i}] {d.url}\n{t}")
+        context_block = "\n\nRetrieved sources:\n" + "\n\n".join(chunks)
+
     client = _client()
 
     resp = client.chat.completions.create(
         model=DEFAULT_MODEL,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT + context_block},
             {"role": "user", "content": user_text},
         ],
         temperature=0.2,
