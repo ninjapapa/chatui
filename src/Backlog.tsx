@@ -13,14 +13,32 @@ type BacklogResponse = {
   items: BacklogItem[];
 };
 
+type PmStatus = {
+  last: {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
+    status: string;
+    new_feedback_count: number;
+    notes: string | null;
+  } | null;
+  logPath: string;
+};
+
+
 export default function Backlog() {
   const [data, setData] = useState<BacklogResponse | null>(null);
+  const [pm, setPm] = useState<PmStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     getJson<BacklogResponse>("/api/backlog")
       .then(setData)
       .catch((e) => setErr(e?.message ?? String(e)));
+
+    getJson<PmStatus>("/api/pm/status")
+      .then(setPm)
+      .catch(() => {});
   }, []);
 
   if (err) {
@@ -44,6 +62,18 @@ export default function Backlog() {
         <a className="text-blue-600 underline" href={data.issuesUrl} target="_blank" rel="noreferrer">
           View on GitHub
         </a>
+      </div>
+
+      <div className="text-xs text-gray-600 mb-3">
+        <div className="font-medium">PM loop</div>
+        {pm?.last ? (
+          <div>
+            Last run: {new Date(pm.last.started_at).toLocaleString()} · status: {pm.last.status} · new feedback: {pm.last.new_feedback_count}
+          </div>
+        ) : (
+          <div>No PM runs yet.</div>
+        )}
+        <div>Log: <span className="font-mono">{pm?.logPath ?? "backend/data/pm_loop.log"}</span></div>
       </div>
 
       {data.items.length === 0 ? (

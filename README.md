@@ -66,7 +66,27 @@ The system should behave like a product that evolves continuously based on actua
 - **Backend:** FastAPI (local MVP)
 - **Storage:** SQLite (see `docs/DECISIONS.md`)
 
+## MVP done (local)
+
+Checklist:
+- [ ] Frontend runs locally (`npm run dev`)
+- [ ] Backend runs locally (see Backend section)
+- [ ] Chat works end-to-end (WS connected; responses returned)
+- [ ] Feedback can be submitted (per-answer + free-form)
+- [ ] Changelog page loads
+- [ ] Backlog page loads
+- [ ] Grounded citations enabled (optional): set `BRAVE_API_KEY`
+- [ ] PM loop can run on-demand (`./scripts/pm_loop_run.sh`)
+- [ ] Rollback works (`./scripts/release_build.sh` + `./scripts/releases_use.sh`)
+
 ## Local dev
+
+Copy env template (optional):
+
+```bash
+cp .env.example .env
+```
+
 
 ### 1) Frontend dev server
 

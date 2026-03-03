@@ -31,7 +31,13 @@ app = FastAPI(title="chatui-backend", version="0.1.0")
 # Local MVP: allow frontend dev server to call backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Local-first default: allow Vite dev server + same-origin.
+    # Set CHATUI_CORS_ALLOW_ALL=1 to allow all origins (not recommended beyond local).
+    allow_origins=(
+        ["*"]
+        if os.environ.get("CHATUI_CORS_ALLOW_ALL") == "1"
+        else ["http://localhost:5173", "http://127.0.0.1:5173"]
+    ),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,6 +128,24 @@ def backlog(limit: int = 50):
 
     return {"repo": repo, "issuesUrl": issues_url, "items": items}
 
+
+
+@app.get("/api/pm/status")
+def pm_status():
+    """Return last PM run info + log location (local)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, started_at, finished_at, status, new_feedback_count, notes
+            FROM pm_runs
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    last = dict(row) if row else None
+    log_path = str((REPO_ROOT / "backend" / "data" / "pm_loop.log").resolve())
+    return {"last": last, "logPath": log_path}
 @app.get("/api/changelog")
 def list_changelog(limit: int = 30):
     if limit < 1 or limit > 200:
