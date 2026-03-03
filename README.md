@@ -163,6 +163,36 @@ npm run smoke
 npm run regression
 ```
 
+## Rollback (local)
+
+Frontend builds can be versioned for quick rollback.
+
+Create a new release (builds + updates the dist symlink):
+
+```bash
+./scripts/release_build.sh
+```
+
+List releases:
+
+```bash
+./scripts/releases_list.sh
+```
+
+Switch to a previous release:
+
+```bash
+./scripts/releases_use.sh <timestamp>
+```
+
+Prune old releases (keep newest N, default 5):
+
+```bash
+./scripts/releases_prune.sh 5
+```
+
+Tip: when running the backend to serve the built UI, it uses dist/ (which is a symlink to the active release).
+
 ## Notes
 
 - The existing codebase may contain leftover UI/components from the original project. We’ll replace/reshape incrementally.

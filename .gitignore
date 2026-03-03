@@ -35,3 +35,4 @@ backend/data/
 # Node
 node_modules/
 dist/
+dist-releases/
