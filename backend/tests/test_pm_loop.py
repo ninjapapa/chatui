@@ -39,6 +39,7 @@ class TestPmLoop(unittest.TestCase):
         self.pmgh.REPO_ROOT = self.repo_root
         self.pmgh.DAILY_DIR = self.repo_root / "docs" / "daily"
         self.pmgh.GITHUB_REPO = "owner/repo"
+        self.pmgh.PM_AGENT_ID = "chatui-pm"
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -94,6 +95,7 @@ class TestPmLoop(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
 class TestPmLoopGh(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -127,6 +129,33 @@ class TestPmLoopGh(unittest.TestCase):
 
         self.pmgh.gh_issue_create = _fake_create
 
+        # Monkeypatch GitHub list to avoid network
+        self.pmgh.fetch_recent_github_issues = lambda limit=200: [
+            {"number": 1, "title": "Existing issue", "url": "https://example.com/existing"}
+        ]
+
+        # Monkeypatch OpenClaw analysis so unit tests are deterministic
+        def _fake_analyze(items, existing):
+            # create one proposal when a feature_request is present
+            for it in items:
+                if it.get("kind") == "freeform_feedback":
+                    meta = it.get("metadata") or {}
+                    if meta.get("type") == "feature_request":
+                        return {
+                            "proposals": [
+                                {
+                                    "action": "create",
+                                    "title": "Add X",
+                                    "body": "Body for X",
+                                    "labels": ["feedback"],
+                                    "feedback_ids": [it.get("id")],
+                                }
+                            ]
+                        }
+            return {"proposals": []}
+
+        self.pmgh.openclaw_analyze = _fake_analyze
+
     def tearDown(self):
         self._tmp.cleanup()
 
@@ -153,3 +182,32 @@ class TestPmLoopGh(unittest.TestCase):
         plans = list((self.pmgh.DAILY_DIR).glob("*-plan.md"))
         self.assertEqual(len(plans), 1)
 
+    def test_skips_duplicate_proposal(self):
+        import db
+
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT INTO freeform_feedback(id, chat_id, text, created_at, metadata_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "ff1",
+                    "chat1",
+                    "Feature request: X",
+                    "2026-03-02T00:00:00+00:00",
+                    '{"type":"feature_request","title":"Add X"}',
+                ),
+            )
+
+        self.pmgh.openclaw_analyze = lambda items, existing: {
+            "proposals": [
+                {
+                    "action": "skip_duplicate",
+                    "title": "Add X",
+                    "duplicate_of": "https://example.com/existing",
+                    "feedback_ids": ["ff1"],
+                }
+            ]
+        }
+
+        rc = self.pmgh.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.created), 0)

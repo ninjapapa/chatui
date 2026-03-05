@@ -1,20 +1,27 @@
-"""PM loop v1: turn feedback into GitHub Issues (Issue #24).
+"""PM loop v2: analyze feedback with OpenClaw, then create GitHub Issues.
 
 Design:
 - Uses local SQLite feedback tables.
 - If no new feedback since last run -> skip.
 - Otherwise:
+  - fetch new feedback
+  - fetch recent GitHub issues (for dedupe)
+  - ask an OpenClaw agent (chatui-pm) to propose issue drafts + dedupe decisions
+  - create issues via `gh issue create`
   - write docs/daily/YYYY-MM-DD-plan.md
-  - create GitHub issues via `gh issue create`
   - insert a changelog entry containing created issue URLs
 
 Requires:
 - `gh auth status` configured
-- repo env var: GITHUB_REPO (default: ninjapapa/chatui)
+- OpenClaw gateway running (or embedded fallback)
+
+Config:
+- GITHUB_REPO env var: default ninjapapa/chatui
+- PM_AGENT_ID env var: OpenClaw agent id to use (default chatui-pm)
 
 Notes:
-- This script is intentionally simple and deterministic.
-- Later: use LLM summarization + dedupe + labeling.
+- The OpenClaw agent MUST return JSON only for machine parsing.
+- This script is intentionally conservative about labels: it only passes labels that already exist.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ from db import get_conn, init_db
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DAILY_DIR = REPO_ROOT / "docs" / "daily"
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "ninjapapa/chatui")
+PM_AGENT_ID = os.environ.get("PM_AGENT_ID", "chatui-pm")
 
 
 def now_iso() -> str:
@@ -124,20 +132,48 @@ def fetch_new_feedback(since_iso: str | None, limit: int = 50) -> list[dict]:
     return out
 
 
+def fetch_recent_github_issues(limit: int = 200) -> list[dict]:
+    """Fetch recent issues for dedupe. Best-effort; returns [] on failure."""
+    try:
+        res = subprocess.run(
+            [
+                "gh",
+                "issue",
+                "list",
+                "-R",
+                GITHUB_REPO,
+                "--limit",
+                str(limit),
+                "--state",
+                "all",
+                "--json",
+                "number,title,url,state,labels,createdAt",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(res.stdout or "[]")
+    except Exception:
+        return []
+
+
 def _gh_list_labels() -> set[str]:
     """Return repo labels (lowercased names)."""
     try:
         res = subprocess.run(
             ["gh", "label", "list", "-R", GITHUB_REPO, "--limit", "200"],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         )
     except Exception:
         return set()
 
     out: set[str] = set()
     for line in (res.stdout or "").splitlines():
-        # format: <name>	<description>	<color> (or similar)
-        name = (line.split("	", 1)[0] if "	" in line else line.split(" ", 1)[0]).strip()
+        # format: <name>\t<description>\t<color> (or similar)
+        name = (line.split("\t", 1)[0] if "\t" in line else line.split(" ", 1)[0]).strip()
         if name:
             out.add(name.lower())
     return out
@@ -164,7 +200,7 @@ def gh_issue_create(title: str, body: str, labels: list[str] | None = None) -> s
 
     res = subprocess.run(cmd, check=True, capture_output=True, text=True)
     # gh prints the URL on stdout
-    url = res.stdout.strip().splitlines()[-1]
+    url = (res.stdout or "").strip().splitlines()[-1]
     return url
 
 
@@ -178,7 +214,13 @@ def insert_changelog_entry(title: str, body_md: str) -> str:
     return entry_id
 
 
-def record_run(started_at: str, finished_at: str | None, status: str, new_feedback_count: int, notes: str | None):
+def record_run(
+    started_at: str,
+    finished_at: str | None,
+    status: str,
+    new_feedback_count: int,
+    notes: str | None,
+):
     run_id = f"pm_{uuid.uuid4().hex}"
     with get_conn() as conn:
         conn.execute(
@@ -187,7 +229,82 @@ def record_run(started_at: str, finished_at: str | None, status: str, new_feedba
         )
 
 
-def write_daily_plan(items: list[dict], created_issue_urls: list[str]) -> Path:
+def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
+    """Call OpenClaw agent to propose issue drafts + dedupe decisions.
+
+    Expected response JSON schema (loose):
+    {
+      "proposals": [
+        {
+          "action": "create"|"skip_duplicate"|"skip",
+          "title": "...",
+          "body": "...",
+          "labels": ["..."]?,
+          "feedback_ids": ["ff_..."]?,
+          "duplicate_of": "https://..."?
+        }
+      ]
+    }
+    """
+
+    payload = {
+        "github_repo": GITHUB_REPO,
+        "new_feedback": items,
+        "existing_issues": existing_issues,
+        "instructions": {
+            "goal": "Create GitHub issue drafts from new user feedback, deduping against existing issues.",
+            "output": "Return JSON only. No markdown, no commentary.",
+            "max_proposals": 20,
+            "prefer_feature_requests": True,
+        },
+    }
+
+    prompt = (
+        "You are the ChatUI PM assistant.\n"
+        "Analyze the provided feedback and existing GitHub issues.\n"
+        "Return JSON ONLY with shape: {\"proposals\":[...]}\n\n"
+        "Rules:\n"
+        "- Deduplicate: if an existing issue already covers it, set action=\"skip_duplicate\" and duplicate_of=<url>.\n"
+        "- Otherwise action=\"create\" with a concise title and a short markdown body.\n"
+        "- Keep it simple: title + body + optional labels.\n"
+        "- Prefer creating issues only for freeform_feedback where metadata.type == feature_request (but you may include other high-signal items).\n"
+        "- Do NOT include anything except valid JSON in the response.\n\n"
+        "INPUT_JSON:\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+
+    run = subprocess.run(
+        [
+            "openclaw",
+            "agent",
+            "--agent",
+            PM_AGENT_ID,
+            "--thinking",
+            "low",
+            "--json",
+            "--timeout",
+            "600",
+            "--message",
+            prompt,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    outer = json.loads(run.stdout or "{}")
+    text_payloads = (((outer.get("result") or {}).get("payloads")) or [])
+    if not text_payloads:
+        raise RuntimeError("OpenClaw returned no payloads")
+
+    raw = (text_payloads[0].get("text") or "").strip()
+    if not raw:
+        raise RuntimeError("OpenClaw returned empty text payload")
+
+    return json.loads(raw)
+
+
+def write_daily_plan(items: list[dict], proposals: list[dict], created_issue_urls: list[str]) -> Path:
     DAILY_DIR.mkdir(parents=True, exist_ok=True)
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     path = DAILY_DIR / f"{day}-plan.md"
@@ -204,7 +321,17 @@ def write_daily_plan(items: list[dict], created_issue_urls: list[str]) -> Path:
             lines.append(f"- answer_feedback {it['id']} thumbs={it['thumbs']} comment={it.get('comment')!r}")
         else:
             t = (it.get("text") or "").replace("\n", " ")
-            lines.append(f"- freeform {it['id']}: {t[:160]}")
+            meta = it.get("metadata") or {}
+            tag = f" type={meta.get('type')}" if meta.get("type") else ""
+            lines.append(f"- freeform {it['id']}{tag}: {t[:160]}")
+
+    lines.append("")
+    lines.append("## OpenClaw proposals")
+    if proposals:
+        for p in proposals:
+            lines.append(f"- action={p.get('action')} title={p.get('title')!r} duplicate_of={p.get('duplicate_of')!r}")
+    else:
+        lines.append("- (none)")
 
     lines.append("")
     lines.append("## Created GitHub issues")
@@ -235,20 +362,41 @@ def main() -> int:
         record_run(started_at, now_iso(), "skipped", 0, "No new feedback")
         return 0
 
+    existing = fetch_recent_github_issues(limit=200)
+
+    analysis = openclaw_analyze(items, existing)
+    proposals = (analysis.get("proposals") or []) if isinstance(analysis, dict) else []
+
     created_urls: list[str] = []
+    created_n = 0
+    skipped_dup = 0
 
-    # Create issues for freeform feature requests; otherwise just aggregate.
-    for it in items:
-        if it["kind"] != "freeform_feedback":
+    for p in proposals:
+        if not isinstance(p, dict):
             continue
-        meta = it.get("metadata") or {}
-        if meta.get("type") == "feature_request":
-            title = meta.get("title") or "Feature request"
-            body = it.get("text") or ""
-            url = gh_issue_create(title=str(title), body=str(body), labels=["feedback", "feature"])
-            created_urls.append(url)
+        action = str(p.get("action") or "").strip()
+        if action == "skip_duplicate":
+            skipped_dup += 1
+            continue
+        if action != "create":
+            continue
 
-    plan_path = write_daily_plan(items, created_urls)
+        title = str(p.get("title") or "").strip()
+        body = str(p.get("body") or "").strip()
+        labels = p.get("labels")
+        if isinstance(labels, list):
+            labels = [str(x) for x in labels if str(x).strip()]
+        else:
+            labels = None
+
+        if not title or not body:
+            continue
+
+        url = gh_issue_create(title=title, body=body, labels=labels)
+        created_urls.append(url)
+        created_n += 1
+
+    plan_path = write_daily_plan(items, proposals, created_urls)
 
     insert_changelog_entry(
         title="PM loop: feedback triage",
@@ -258,7 +406,13 @@ def main() -> int:
         ),
     )
 
-    record_run(started_at, now_iso(), "ok", len(items), f"created={len(created_urls)} plan={plan_path}")
+    record_run(
+        started_at,
+        now_iso(),
+        "ok",
+        len(items),
+        f"proposals={len(proposals)} created={created_n} skipped_duplicate={skipped_dup} plan={plan_path}",
+    )
     return 0
 
 

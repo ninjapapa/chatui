@@ -40,3 +40,6 @@ dist-releases/
 # Playwright
 playwright-report/
 test-results/
+
+# OpenClaw
+.openclaw/
