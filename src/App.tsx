@@ -13,7 +13,6 @@ import { getOrCreateChatId } from "./chatId"
 import Changelog from "./Changelog"
 import Backlog from "./Backlog"
 import AnswerFeedback from "./AnswerFeedback"
-import FeatureRequest from "./FeatureRequest"
 
 interface Message {
   id?: string
@@ -239,7 +238,27 @@ function App() {
         </div>
         {freeformStatus && <div className="text-center text-xs text-gray-600 mt-1">{freeformStatus}</div>}
 
-        {chatId && <FeatureRequest chatId={chatId} />}
+
+
+        <div className="mt-3 flex items-center justify-center">
+          <button
+            type="button"
+            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50"
+            onClick={() => {
+              const url = new URL(window.location.href)
+              url.searchParams.set("panel", "feature-request")
+              // pass chat id explicitly when available
+              if (chatId) url.searchParams.set("chat_id", chatId)
+              const features = "popup,width=520,height=700"
+              const w = window.open(url.toString(), "feature_request", features)
+              if (!w) window.open(url.toString(), "_blank", "noopener,noreferrer")
+            }}
+            disabled={!chatId}
+            title={!chatId ? "Chat not ready yet" : "Open feature request window"}
+          >
+            Request a feature ↗
+          </button>
+        </div>
       </header>
 
       {view === "changelog" ? (
