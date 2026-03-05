@@ -144,6 +144,26 @@ To run the PM loop on-demand (creates/updates GitHub issues from new feedback; s
 ./scripts/pm_loop_run.sh
 ```
 
+### OpenClaw PM analyzer agent
+
+The PM loop uses an OpenClaw agent to analyze new feedback and dedupe against existing GitHub issues before creating new ones.
+
+Create the agent once on the machine that will run the PM loop:
+
+```bash
+openclaw agents add chatui-pm --workspace ~/chatui --model minimax-m2.5
+openclaw gateway restart
+```
+
+Then ensure the PM loop uses it (defaults shown):
+
+```bash
+export PM_AGENT_ID=chatui-pm
+export GITHUB_REPO=ninjapapa/chatui
+```
+
+Note: `scripts/pm_loop_run.sh` runs `backend/pm_loop_gh.py`, which calls `openclaw agent --agent $PM_AGENT_ID ...` under the hood.
+
 To install a nightly cron (default 02:10 local time):
 
 ```bash
