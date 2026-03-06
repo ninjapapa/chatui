@@ -1,31 +1,40 @@
-"""PM loop v2: analyze feedback with OpenClaw, then create GitHub Issues.
+"""PM loop v3: triage feedback -> (optionally) implement issues.
 
-Design:
-- Uses local SQLite feedback tables.
-- If no new feedback since last run -> skip.
-- Otherwise:
-  - fetch new feedback
-  - fetch recent GitHub issues (for dedupe)
-  - ask an OpenClaw agent (chatui-pm) to propose issue drafts + dedupe decisions
-  - create issues via `gh issue create`
-  - write docs/daily/YYYY-MM-DD-plan.md
-  - insert a changelog entry containing created issue URLs
+This script supports two modes:
+
+1) triage (default)
+   - fetch new feedback since last pm_runs.finished_at
+   - fetch recent GitHub issues (for dedupe context)
+   - call an OpenClaw agent to analyze/dedupe and propose issue drafts
+   - create GitHub issues via `gh issue create`
+   - write docs/daily/YYYY-MM-DD-plan.md
+   - insert a changelog entry containing created issue URLs
+
+2) apply (new)
+   - fetch a specific GitHub issue
+   - call an OpenClaw agent to implement it in the repo working tree (no commit)
+   - run tests
+   - commit + push
+   - relaunch/restart local services via an optional hook
 
 Requires:
 - `gh auth status` configured
 - OpenClaw gateway running (or embedded fallback)
 
-Config:
-- GITHUB_REPO env var: default ninjapapa/chatui
-- PM_AGENT_ID env var: OpenClaw agent id to use (default chatui-pm)
+Config (env vars):
+- GITHUB_REPO: default ninjapapa/chatui
+- PM_AGENT_ID: OpenClaw agent id to use (default chatui-pm)
+- PM_TEST_CMD: default "npm test"
+- PM_RELAUNCH_CMD: optional shell command to relaunch services after push
 
 Notes:
 - The OpenClaw agent MUST return JSON only for machine parsing.
-- This script is intentionally conservative about labels: it only passes labels that already exist.
+- The agent is expected to modify files but NOT commit/push.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -37,8 +46,20 @@ from db import get_conn, init_db
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DAILY_DIR = REPO_ROOT / "docs" / "daily"
+
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "ninjapapa/chatui")
 PM_AGENT_ID = os.environ.get("PM_AGENT_ID", "chatui-pm")
+PM_TEST_CMD = os.environ.get("PM_TEST_CMD", "npm test")
+PM_RELAUNCH_CMD = os.environ.get("PM_RELAUNCH_CMD")
+
+
+def _run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=str(cwd) if cwd else None)
+
+
+def _run_shell(command: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    # bash -lc so user env/rc can apply when needed
+    return _run(["bash", "-lc", command], cwd=cwd)
 
 
 def now_iso() -> str:
@@ -135,7 +156,7 @@ def fetch_new_feedback(since_iso: str | None, limit: int = 50) -> list[dict]:
 def fetch_recent_github_issues(limit: int = 200) -> list[dict]:
     """Fetch recent issues for dedupe. Best-effort; returns [] on failure."""
     try:
-        res = subprocess.run(
+        res = _run(
             [
                 "gh",
                 "issue",
@@ -149,24 +170,35 @@ def fetch_recent_github_issues(limit: int = 200) -> list[dict]:
                 "--json",
                 "number,title,url,state,labels,createdAt",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            cwd=REPO_ROOT,
         )
         return json.loads(res.stdout or "[]")
     except Exception:
         return []
 
 
+def gh_issue_view(issue: str) -> dict:
+    """View a GitHub issue by number or URL."""
+    res = _run(
+        [
+            "gh",
+            "issue",
+            "view",
+            issue,
+            "-R",
+            GITHUB_REPO,
+            "--json",
+            "number,title,url,body,state,labels,assignees,createdAt",
+        ],
+        cwd=REPO_ROOT,
+    )
+    return json.loads(res.stdout or "{}")
+
+
 def _gh_list_labels() -> set[str]:
     """Return repo labels (lowercased names)."""
     try:
-        res = subprocess.run(
-            ["gh", "label", "list", "-R", GITHUB_REPO, "--limit", "200"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        res = _run(["gh", "label", "list", "-R", GITHUB_REPO, "--limit", "200"], cwd=REPO_ROOT)
     except Exception:
         return set()
 
@@ -198,7 +230,7 @@ def gh_issue_create(title: str, body: str, labels: list[str] | None = None) -> s
         for l in safe:
             cmd.extend(["--label", l])
 
-    res = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    res = _run(cmd, cwd=REPO_ROOT)
     # gh prints the URL on stdout
     url = (res.stdout or "").strip().splitlines()[-1]
     return url
@@ -230,22 +262,7 @@ def record_run(
 
 
 def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
-    """Call OpenClaw agent to propose issue drafts + dedupe decisions.
-
-    Expected response JSON schema (loose):
-    {
-      "proposals": [
-        {
-          "action": "create"|"skip_duplicate"|"skip",
-          "title": "...",
-          "body": "...",
-          "labels": ["..."]?,
-          "feedback_ids": ["ff_..."]?,
-          "duplicate_of": "https://..."?
-        }
-      ]
-    }
-    """
+    """Call OpenClaw agent to propose issue drafts + dedupe decisions."""
 
     payload = {
         "github_repo": GITHUB_REPO,
@@ -273,7 +290,7 @@ def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
         + json.dumps(payload, ensure_ascii=False)
     )
 
-    run = subprocess.run(
+    run = _run(
         [
             "openclaw",
             "agent",
@@ -287,9 +304,83 @@ def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
             "--message",
             prompt,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    outer = json.loads(run.stdout or "{}")
+    text_payloads = (((outer.get("result") or {}).get("payloads")) or [])
+    if not text_payloads:
+        raise RuntimeError("OpenClaw returned no payloads")
+
+    raw = (text_payloads[0].get("text") or "").strip()
+    if not raw:
+        raise RuntimeError("OpenClaw returned empty text payload")
+
+    return json.loads(raw)
+
+
+def openclaw_apply_issue(issue: dict) -> dict:
+    """Ask OpenClaw agent to implement a GitHub issue in the repo working tree.
+
+    The agent must:
+    - make code changes locally
+    - run fast checks if helpful
+    - NOT commit or push
+    - return JSON only with a short summary
+
+    Expected JSON (loose):
+    {"ok": true, "summary": "...", "notes": "..."}
+    """
+
+    payload = {
+        "github_repo": GITHUB_REPO,
+        "issue": {
+            "number": issue.get("number"),
+            "title": issue.get("title"),
+            "url": issue.get("url"),
+            "body": issue.get("body"),
+        },
+        "repo_root": str(REPO_ROOT),
+        "instructions": {
+            "do_not_commit": True,
+            "do_not_push": True,
+            "prefer_small_pr": True,
+            "run_tests": False,
+        },
+    }
+
+    prompt = (
+        "You are a coding agent working in the ChatUI repo.\n"
+        "Your task: implement the provided GitHub issue in the local working tree.\n\n"
+        "Hard rules:\n"
+        "- Do NOT commit.\n"
+        "- Do NOT push.\n"
+        "- Return JSON ONLY.\n\n"
+        "Suggested workflow:\n"
+        "- Read relevant files.\n"
+        "- Implement the change.\n"
+        "- Update/add tests if needed.\n"
+        "- Keep changes minimal.\n\n"
+        "Return JSON like: {\"ok\":true,\"summary\":\"...\",\"notes\":\"...\"}\n\n"
+        "INPUT_JSON:\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+
+    run = _run(
+        [
+            "openclaw",
+            "agent",
+            "--agent",
+            PM_AGENT_ID,
+            "--thinking",
+            "medium",
+            "--json",
+            "--timeout",
+            "1800",
+            "--message",
+            prompt,
+        ],
+        cwd=REPO_ROOT,
     )
 
     outer = json.loads(run.stdout or "{}")
@@ -351,7 +442,9 @@ def write_daily_plan(items: list[dict], proposals: list[dict], created_issue_url
     return path
 
 
-def main() -> int:
+# -------- Mode entrypoints --------
+
+def triage_main() -> int:
     init_db()
 
     started_at = now_iso()
@@ -416,5 +509,69 @@ def main() -> int:
     return 0
 
 
+def apply_main(issue_ref: str, *, test_cmd: str = PM_TEST_CMD, relaunch_cmd: str | None = PM_RELAUNCH_CMD) -> int:
+    # Preflight: require clean working tree
+    status = _run(["git", "status", "--porcelain"], cwd=REPO_ROOT).stdout.strip()
+    if status:
+        raise SystemExit("Refusing to apply: git working tree is not clean")
+
+    issue = gh_issue_view(issue_ref)
+    if not issue or not issue.get("number"):
+        raise SystemExit(f"Could not resolve issue: {issue_ref}")
+
+    apply_result = openclaw_apply_issue(issue)
+    if not isinstance(apply_result, dict) or not apply_result.get("ok"):
+        raise SystemExit(f"OpenClaw apply failed or returned ok=false: {apply_result}")
+
+    # Require that something changed
+    changed = _run(["git", "status", "--porcelain"], cwd=REPO_ROOT).stdout.strip()
+    if not changed:
+        raise SystemExit("Apply completed but no files changed; refusing to commit")
+
+    # Run tests
+    if test_cmd.strip():
+        _run_shell(test_cmd, cwd=REPO_ROOT)
+
+    # Commit
+    n = int(issue["number"])
+    title = str(issue.get("title") or "").strip()[:120]
+    msg = f"Apply #{n}: {title}" if title else f"Apply #{n}"
+
+    _run(["git", "add", "-A"], cwd=REPO_ROOT)
+    _run(["git", "commit", "-m", msg], cwd=REPO_ROOT)
+
+    # Push
+    _run(["git", "push", "origin", "HEAD"], cwd=REPO_ROOT)
+
+    # Optional relaunch
+    if relaunch_cmd and relaunch_cmd.strip():
+        _run_shell(relaunch_cmd, cwd=REPO_ROOT)
+
+    return 0
+
+
+def main() -> int:
+    """Backward compatible entrypoint used by existing scripts/tests (triage mode)."""
+    return triage_main()
+
+
+def cli_main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=["triage", "apply"], default="triage")
+    p.add_argument("--issue", help="Issue number or URL (apply mode)")
+    p.add_argument("--test-cmd", default=PM_TEST_CMD, help='Shell command to run tests (apply mode). Default: env PM_TEST_CMD or "npm test"')
+    p.add_argument("--relaunch-cmd", default=PM_RELAUNCH_CMD, help="Optional shell command to relaunch services after push (apply mode).")
+
+    args = p.parse_args(argv)
+
+    if args.mode == "triage":
+        return triage_main()
+
+    if not args.issue:
+        raise SystemExit("--issue is required in apply mode")
+
+    return apply_main(args.issue, test_cmd=args.test_cmd, relaunch_cmd=args.relaunch_cmd)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(cli_main())
