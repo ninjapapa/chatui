@@ -54,7 +54,12 @@ PM_AGENT_ID = os.environ.get("PM_AGENT_ID", "chatui-pm")
 PM_TEST_CMD = os.environ.get("PM_TEST_CMD")
 if not PM_TEST_CMD:
     _npm = shutil.which("npm")
-    PM_TEST_CMD = f"{_npm} test" if _npm else "npm test"
+    if _npm:
+        _nodebin = str(Path(_npm).resolve().parent)
+        # In non-interactive shells (CI/cron), nvm may not load; ensure node is on PATH.
+        PM_TEST_CMD = f"PATH={_nodebin}:$PATH {_npm} test"
+    else:
+        PM_TEST_CMD = "npm test"
 
 PM_RELAUNCH_CMD = os.environ.get("PM_RELAUNCH_CMD")
 
