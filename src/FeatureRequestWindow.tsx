@@ -21,10 +21,13 @@ export default function FeatureRequestWindow() {
 
   useEffect(() => {
     setChatId(resolvedChatId ?? getOrCreateChatId())
+
     // Best-effort focus for popouts
     try {
       window.focus()
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [resolvedChatId])
 
   if (!chatId) return null
