@@ -20,6 +20,7 @@ interface Message {
   thinking?: string
   markdown?: string
   parent_message_id?: string
+  follow_ups?: string[]
 }
 
 function parseIncomingMessage(data: any): Message {
@@ -29,6 +30,19 @@ function parseIncomingMessage(data: any): Message {
   let markdown = content
   if (thinkMatch) markdown = content.replace(/<think>.*?<\/think>/s, "").trim()
 
+  // Extract follow-up questions from "Want to learn more?" section
+  const followUps: string[] = []
+  const followUpMatch = markdown.match(/Want to learn more\?[\s\n]*(•[^\n]+(?:\n•[^\n]+)*)/i)
+  if (followUpMatch) {
+    const followUpText = followUpMatch[1]
+    const matches = followUpText.matchAll(/•\s*([^\n]+)/g)
+    for (const match of matches) {
+      if (match[1]) followUps.push(match[1].trim())
+    }
+    // Remove the follow-up section from markdown for display
+    markdown = markdown.replace(/[\s\n]*Want to learn more\?[\s\n]*(•[^\n]+(?:\n•[^\n]+)*)/i, "").trim()
+  }
+
   return {
     id: data.id,
     chat_id: data.chat_id,
@@ -37,6 +51,7 @@ function parseIncomingMessage(data: any): Message {
     thinking,
     markdown,
     parent_message_id: data.parent_message_id,
+    follow_ups: followUps.length > 0 ? followUps : undefined,
   }
 }
 
@@ -161,6 +176,12 @@ function App() {
     setInput("")
   }
 
+  const handleFollowUpClick = (question: string) => {
+    setInput(question)
+    const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement
+    inputEl?.focus()
+  }
+
   const CodeBlock = ({ inline, className, children, ...props }: any) => {
     const match = /language-(\w+)/.exec(className || "")
     return !inline && match ? (
@@ -223,6 +244,24 @@ function App() {
                   </details>
                 )}
                 {message.markdown && <ReactMarkdown components={{ code: CodeBlock }}>{message.markdown}</ReactMarkdown>}
+
+                {message.follow_ups && message.follow_ups.length > 0 && (
+                  <div className="mt-3 pt-3 border-t">
+                    <div className="text-sm text-gray-600 mb-2">Want to learn more?</div>
+                    <div className="flex flex-wrap gap-2">
+                      {message.follow_ups.map((question, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleFollowUpClick(question)}
+                          className="text-sm px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full transition-colors border border-blue-200"
+                        >
+                          {question}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {message.role === "assistant" && message.id && chatId && <AnswerFeedback chatId={chatId} messageId={message.id} />}
               </div>
