@@ -10,8 +10,6 @@ import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 import "./App.css"
 import { getJson, postJson, backendWsBase } from "./api"
 import { getOrCreateChatId } from "./chatId"
-import Changelog from "./Changelog"
-import Backlog from "./Backlog"
 import AnswerFeedback from "./AnswerFeedback"
 
 interface Message {
@@ -47,9 +45,6 @@ function App() {
   const [input, setInput] = useState("")
   const [isConnected, setIsConnected] = useState(false)
   const [chatId, setChatId] = useState<string | null>(null)
-  const [freeformText, setFreeformText] = useState("")
-  const [freeformStatus, setFreeformStatus] = useState<string | null>(null)
-  const [view, setView] = useState<"chat" | "changelog" | "backlog">("chat")
 
   const socketRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -159,29 +154,11 @@ function App() {
           chat_id: chatId,
           message_id: userMsgId,
           content: input,
-        })
+        }),
       )
     }
 
     setInput("")
-  }
-
-
-  const submitFreeform = async () => {
-    if (!chatId || !freeformText.trim()) return
-    setFreeformStatus("Saving...")
-    try {
-      await postJson("/api/feedback/freeform", {
-        id: `ff_${crypto.randomUUID()}`,
-        chat_id: chatId,
-        text: freeformText,
-      })
-      setFreeformText("")
-      setFreeformStatus("Saved")
-      setTimeout(() => setFreeformStatus(null), 1500)
-    } catch (e: any) {
-      setFreeformStatus(`Error: ${e?.message ?? e}`)
-    }
   }
 
   const CodeBlock = ({ inline, className, children, ...props }: any) => {
@@ -206,70 +183,26 @@ function App() {
           {isConnected ? "Connected" : "Disconnected"}
         </div>
 
-        <div className="mt-3 flex gap-2 items-center justify-center">
-          <button
-            type="button"
-            className={`px-3 py-2 rounded-lg border ${view === "chat" ? "bg-gray-900 text-white" : "bg-white"}`}
-            onClick={() => setView("chat")}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            className={`px-3 py-2 rounded-lg border ${view === "changelog" ? "bg-gray-900 text-white" : "bg-white"}`}
-            onClick={() => setView("changelog")}
-          >
-            Changelog
-          </button>
-          <input
-            value={freeformText}
-            onChange={(e) => setFreeformText(e.target.value)}
-            placeholder="Free-form feedback (catch-all)…"
-            className="w-full max-w-xl p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <button
-            onClick={submitFreeform}
-            className="bg-gray-900 text-white px-3 py-2 rounded-lg disabled:bg-gray-400"
-            disabled={!freeformText.trim() || !chatId}
-            type="button"
-          >
-            Send
-          </button>
-        </div>
-        {freeformStatus && <div className="text-center text-xs text-gray-600 mt-1">{freeformStatus}</div>}
-
-
-
         <div className="mt-3 flex items-center justify-center">
           <button
             type="button"
             className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50"
             onClick={() => {
               const url = new URL(window.location.href)
-              url.searchParams.set("panel", "feature-request")
-              // pass chat id explicitly when available
+              url.searchParams.set("panel", "feedback")
               if (chatId) url.searchParams.set("chat_id", chatId)
-              const features = "popup,width=520,height=700"
-              const w = window.open(url.toString(), "feature_request", features)
+              const features = "popup,width=520,height=760"
+              const w = window.open(url.toString(), "feedback", features)
               if (!w) window.open(url.toString(), "_blank", "noopener,noreferrer")
             }}
             disabled={!chatId}
-            title={!chatId ? "Chat not ready yet" : "Open feature request window"}
+            title={!chatId ? "Chat not ready yet" : "Open feedback window"}
           >
-            Request a feature ↗
+            Feedback ↗
           </button>
         </div>
       </header>
 
-      {view === "changelog" ? (
-        <div className="flex-1 overflow-y-auto">
-          <Changelog />
-        </div>
-      ) : view === "backlog" ? (
-        <div className="flex-1 overflow-y-auto">
-          <Backlog />
-        </div>
-      ) : (
       <div className="flex-1 overflow-y-auto py-4 space-y-4">
         {messages.map((message, index) => (
           <div key={message.id ?? index} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
@@ -291,16 +224,13 @@ function App() {
                 )}
                 {message.markdown && <ReactMarkdown components={{ code: CodeBlock }}>{message.markdown}</ReactMarkdown>}
 
-                {message.role === "assistant" && message.id && chatId && (
-                  <AnswerFeedback chatId={chatId} messageId={message.id} />
-                )}
+                {message.role === "assistant" && message.id && chatId && <AnswerFeedback chatId={chatId} messageId={message.id} />}
               </div>
             )}
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
-      )}
 
       <form onSubmit={handleSubmit} className="border-t pt-4">
         <div className="flex items-center">
