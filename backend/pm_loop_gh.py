@@ -38,6 +38,7 @@ import argparse
 import json
 import re
 import os
+import shutil
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -50,7 +51,11 @@ DAILY_DIR = REPO_ROOT / "docs" / "daily"
 
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "ninjapapa/chatui")
 PM_AGENT_ID = os.environ.get("PM_AGENT_ID", "chatui-pm")
-PM_TEST_CMD = os.environ.get("PM_TEST_CMD", "npm test")
+PM_TEST_CMD = os.environ.get("PM_TEST_CMD")
+if not PM_TEST_CMD:
+    _npm = shutil.which("npm")
+    PM_TEST_CMD = f"{_npm} test" if _npm else "npm test"
+
 PM_RELAUNCH_CMD = os.environ.get("PM_RELAUNCH_CMD")
 
 
