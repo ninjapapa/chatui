@@ -6,8 +6,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Defaults
 : "${PM_LOOP_AGENT_ID:=chatui-pm}"
 : "${PM_LOOP_REPO:=ninjapapa/chatui}"
-: "${PM_LOOP_TEST_CMD:=npm test}"
-: "${PM_LOOP_APPLY:=1}"   # 1 = triage then apply first created issue (if any)
+if [[ -z "${PM_LOOP_TEST_CMD:-}" ]]; then
+  if command -v npm >/dev/null 2>&1; then
+    PM_LOOP_TEST_CMD="$(command -v npm) test"
+  else
+    PM_LOOP_TEST_CMD="npm test"
+  fi
+fi
+: "${PM_LOOP_APPLY:=1}" # 1 = triage then apply first created issue (if any)
 
 cd "$ROOT_DIR/backend"
 
@@ -55,6 +61,8 @@ if [[ -z "$ISSUE_URL" ]]; then
 fi
 
 echo "Applying issue: $ISSUE_URL" >&2
+
+echo "Using test command: $PM_LOOP_TEST_CMD" >&2
 
 cd "$ROOT_DIR/backend"
 python pm_loop_gh.py --mode apply --issue "$ISSUE_URL" --test-cmd "$PM_LOOP_TEST_CMD"
