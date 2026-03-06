@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import subprocess
 import uuid
@@ -261,6 +262,31 @@ def record_run(
         )
 
 
+def _parse_json_payload_from_openclaw(outer: dict) -> dict:
+    """Extract and parse the assistant JSON response from an openclaw agent --json run.
+
+    OpenClaw returns an outer JSON envelope. The assistant response text is in result.payloads[].text.
+    Some models may include extra whitespace or preambles; we attempt best-effort JSON block extraction.
+    """
+
+    payloads = (((outer.get("result") or {}).get("payloads")) or [])
+    texts = [str(p.get("text") or "").strip() for p in payloads if (p.get("text") or "").strip()]
+    if not texts:
+        raise RuntimeError("OpenClaw returned no text payloads")
+
+    raw = texts[-1]
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        # Best-effort: extract first JSON object/array from the text.
+        m = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", raw)
+        if not m:
+            raise RuntimeError(f"OpenClaw returned non-JSON response: {raw[:400]!r}")
+        blob = m.group(1)
+        return json.loads(blob)
+
+
 def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
     """Call OpenClaw agent to propose issue drafts + dedupe decisions."""
 
@@ -308,15 +334,7 @@ def openclaw_analyze(items: list[dict], existing_issues: list[dict]) -> dict:
     )
 
     outer = json.loads(run.stdout or "{}")
-    text_payloads = (((outer.get("result") or {}).get("payloads")) or [])
-    if not text_payloads:
-        raise RuntimeError("OpenClaw returned no payloads")
-
-    raw = (text_payloads[0].get("text") or "").strip()
-    if not raw:
-        raise RuntimeError("OpenClaw returned empty text payload")
-
-    return json.loads(raw)
+    return _parse_json_payload_from_openclaw(outer)
 
 
 def openclaw_apply_issue(issue: dict) -> dict:
@@ -384,15 +402,7 @@ def openclaw_apply_issue(issue: dict) -> dict:
     )
 
     outer = json.loads(run.stdout or "{}")
-    text_payloads = (((outer.get("result") or {}).get("payloads")) or [])
-    if not text_payloads:
-        raise RuntimeError("OpenClaw returned no payloads")
-
-    raw = (text_payloads[0].get("text") or "").strip()
-    if not raw:
-        raise RuntimeError("OpenClaw returned empty text payload")
-
-    return json.loads(raw)
+    return _parse_json_payload_from_openclaw(outer)
 
 
 def write_daily_plan(items: list[dict], proposals: list[dict], created_issue_urls: list[str]) -> Path:
