@@ -43,3 +43,13 @@ test-results/
 
 # OpenClaw
 .openclaw/
+.openclaw/
+
+# Local workspace notes
+AGENTS.md
+SOUL.md
+TOOLS.md
+IDENTITY.md
+USER.md
+HEARTBEAT.md
+docs/daily/
