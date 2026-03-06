@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${PM_LOOP_REPO:=ninjapapa/chatui}"
 if [[ -z "${PM_LOOP_TEST_CMD:-}" ]]; then
   if command -v npm >/dev/null 2>&1; then
-    PM_LOOP_TEST_CMD="$(command -v npm) test"
+    PM_LOOP_TEST_CMD="PATH=$(dirname $(command -v npm)):$PATH $(command -v npm) test"
   else
     PM_LOOP_TEST_CMD="npm test"
   fi
