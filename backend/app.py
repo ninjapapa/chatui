@@ -31,12 +31,18 @@ app = FastAPI(title="chatui-backend", version="0.1.0")
 # Local MVP: allow frontend dev server to call backend
 app.add_middleware(
     CORSMiddleware,
-    # Local-first default: allow Vite dev server + same-origin.
-    # Set CHATUI_CORS_ALLOW_ALL=1 to allow all origins (not recommended beyond local).
+    # Local MVP: allow frontend dev server to call backend.
+    #
+    # Notes:
+    # - Vite may auto-increment ports (5173, 5174, ...), so we allow localhost/127.0.0.1 on 517x via regex.
+    # - Set CHATUI_CORS_ALLOW_ALL=1 to allow all origins (not recommended beyond local).
     allow_origins=(
-        ["*"]
+        ["*"] if os.environ.get("CHATUI_CORS_ALLOW_ALL") == "1" else []
+    ),
+    allow_origin_regex=(
+        None
         if os.environ.get("CHATUI_CORS_ALLOW_ALL") == "1"
-        else ["http://localhost:5173", "http://127.0.0.1:5173"]
+        else r"^https?://(localhost|127\.0\.0\.1):517\d$"
     ),
     allow_credentials=False,
     allow_methods=["*"],
